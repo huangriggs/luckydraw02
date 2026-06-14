@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>極光霓虹 - 互動式加權抽獎系統</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Noto+Sans+TC:wght@300;400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <!-- 酷炫動態極光背景 -->
+    <div class="aurora-bg">
+        <div class="aurora-blob aurora-1"></div>
+        <div class="aurora-blob aurora-2"></div>
+        <div class="aurora-blob aurora-3"></div>
+    </div>
+
+    <!-- 系統主容器 -->
+    <div class="app-container">
+        <!-- 頂部標頭 -->
+        <header class="app-header">
+            <div class="logo-area">
+                <span class="logo-icon">✨</span>
+                <h1>極光霓虹 <span>抽獎系統</span></h1>
+            </div>
+            
+            <nav class="nav-tabs">
+                <button class="tab-btn active" data-tab="stage-tab">🎯 抽獎舞台</button>
+                <button class="tab-btn" data-tab="manage-tab">⚙️ 資料管理</button>
+                <button class="tab-btn" data-tab="history-tab">📜 中獎紀錄</button>
+            </nav>
+
+            <div class="header-controls">
+                <button id="sound-toggle-btn" class="icon-btn" title="切換音效">🔊</button>
+                <button id="reset-storage-btn" class="text-danger-btn">重置系統</button>
+            </div>
+        </header>
+
+        <!-- 系統主畫面 -->
+        <main class="app-main">
+            
+            <!-- 1. 抽獎舞台分頁 -->
+            <section id="stage-tab" class="tab-content active">
+                <div class="stage-layout">
+                    <!-- 左側控制面板 -->
+                    <div class="panel glass stage-control-panel">
+                        <h2>抽獎設定</h2>
+                        
+                        <div class="form-group">
+                            <label for="prize-select">選擇目前抽獎獎品</label>
+                            <select id="prize-select" class="form-select">
+                                <option value="" disabled selected>-- 請選擇獎品 --</option>
+                            </select>
+                        </div>
+
+                        <!-- 獎品詳細資訊卡片 -->
+                        <div id="selected-prize-card" class="prize-detail-card">
+                            <div class="detail-row">
+                                <span class="label">剩餘數量:</span>
+                                <span id="prize-qty" class="value text-highlight">--</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="label">積分限制:</span>
+                                <span id="prize-threshold" class="value text-warning">--</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="label">合規人數:</span>
+                                <span id="eligible-count" class="value text-success">--</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>抽獎模式</label>
+                            <div class="radio-group">
+                                <label class="radio-label">
+                                    <input type="radio" name="draw-mode" value="equal" checked>
+                                    <span class="radio-custom"></span>
+                                    等機率抽獎
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="draw-mode" value="weighted">
+                                    <span class="radio-custom"></span>
+                                    積分加權抽獎
+                                </label>
+                            </div>
+                            <small class="help-text">加權模式下，抽獎者積分越高，中獎機率按比例增加。</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="draw-count">單次抽取人數</label>
+                            <input type="number" id="draw-count" class="form-control" min="1" max="10" value="1">
+                        </div>
+
+                        <div class="draw-actions">
+                            <button id="start-draw-btn" class="btn btn-primary btn-lg btn-glow" disabled>開始抽獎</button>
+                        </div>
+                    </div>
+
+                    <!-- 右側抽獎大舞台 -->
+                    <div class="panel glass stage-display-panel">
+                        <!-- Canvas 渲染 3D 旋轉名字粒子 -->
+                        <canvas id="stage-canvas"></canvas>
+                        
+                        <!-- 粒子背景上的文字提示疊加層 -->
+                        <div class="stage-overlay">
+                            <div id="stage-hint" class="stage-hint-text">請選擇獎品並點擊開始抽獎</div>
+                            <div id="rolling-name-display" class="rolling-name">READY</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. 資料管理分頁 -->
+            <section id="manage-tab" class="tab-content">
+                <div class="manage-layout">
+                    <!-- 上半部：匯入與新增 -->
+                    <div class="manage-grid-top">
+                        <!-- 批次匯入卡片 -->
+                        <div class="panel glass import-card">
+                            <h2>📥 批次匯入資料</h2>
+                            <p class="section-desc">支援拖放上傳 CSV/TXT 檔案，請點擊下載範例格式檔案參考：</p>
+                            
+                            <div class="sample-download-bar">
+                                <button id="dl-participants-sample" class="btn btn-outline btn-sm">👥 抽獎者範例檔.csv</button>
+                                <button id="dl-prizes-sample" class="btn btn-outline btn-sm">🎁 獎品範例檔.csv</button>
+                            </div>
+
+                            <div class="upload-areas-container">
+                                <!-- 抽獎者上傳 -->
+                                <div class="drop-zone" id="participants-dropzone">
+                                    <span class="drop-icon">👥</span>
+                                    <span class="drop-text">拖曳或點擊上傳「抽獎者名單」</span>
+                                    <input type="file" id="participants-file-input" class="file-input" accept=".csv,.txt">
+                                </div>
+                                <!-- 獎品上傳 -->
+                                <div class="drop-zone" id="prizes-dropzone">
+                                    <span class="drop-icon">🎁</span>
+                                    <span class="drop-text">拖曳或點擊上傳「獎品清單」</span>
+                                    <input type="file" id="prizes-file-input" class="file-input" accept=".csv,.txt">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 手動新增卡片 -->
+                        <div class="panel glass manual-card">
+                            <h2>✍️ 手動新增資料</h2>
+                            
+                            <div class="manual-forms">
+                                <!-- 抽獎者手動 -->
+                                <form id="add-participant-form" class="sub-form">
+                                    <h3>新增單筆抽獎者</h3>
+                                    <div class="form-row">
+                                        <input type="text" id="manual-p-name" class="form-control" placeholder="姓名" required>
+                                        <input type="number" id="manual-p-points" class="form-control" placeholder="積分" min="0" required>
+                                        <input type="text" id="manual-p-dept" class="form-control" placeholder="部門(選填)">
+                                        <button type="submit" class="btn btn-primary">新增</button>
+                                    </div>
+                                </form>
+
+                                <!-- 獎品手動 -->
+                                <form id="add-prize-form" class="sub-form">
+                                    <h3>新增單筆獎品</h3>
+                                    <div class="form-row">
+                                        <input type="text" id="manual-prz-name" class="form-control" placeholder="獎品名稱" required>
+                                        <input type="number" id="manual-prz-qty" class="form-control" placeholder="數量" min="1" required>
+                                        <input type="number" id="manual-prz-threshold" class="form-control" placeholder="最低積分門檻" min="0" required>
+                                        <button type="submit" class="btn btn-primary">新增</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 下半部：清單表格 -->
+                    <div class="manage-grid-bottom">
+                        <!-- 抽獎者列表 -->
+                        <div class="panel glass list-card">
+                            <div class="list-header">
+                                <h2>👥 抽獎者名單 (<span id="total-participants-count">0</span> 人)</h2>
+                                <div class="list-actions">
+                                    <input type="text" id="search-participants" class="form-control table-search" placeholder="搜尋姓名/部門...">
+                                    <button id="clear-participants-btn" class="btn btn-danger btn-sm">全部清空</button>
+                                </div>
+                            </div>
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>姓名</th>
+                                            <th>積分</th>
+                                            <th>部門</th>
+                                            <th>狀態</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="participants-table-body">
+                                        <tr>
+                                            <td colspan="5" class="empty-row">尚未匯入或新增任何抽獎者</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 獎品列表 -->
+                        <div class="panel glass list-card">
+                            <div class="list-header">
+                                <h2>🎁 獎品清單 (<span id="total-prizes-count">0</span> 種)</h2>
+                                <div class="list-actions">
+                                    <button id="clear-prizes-btn" class="btn btn-danger btn-sm">全部清空</button>
+                                </div>
+                            </div>
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>獎品名稱</th>
+                                            <th>剩餘數量</th>
+                                            <th>最低積分門檻</th>
+                                            <th>已抽出得獎者</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="prizes-table-body">
+                                        <tr>
+                                            <td colspan="5" class="empty-row">尚未匯入或新增任何獎品</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. 中獎紀錄分頁 -->
+            <section id="history-tab" class="tab-content">
+                <div class="panel glass history-card">
+                    <div class="list-header">
+                        <h2>📜 中獎紀錄清單</h2>
+                        <div class="list-actions">
+                            <button id="export-history-btn" class="btn btn-success">📤 匯出中獎名單 (Excel/CSV)</button>
+                            <button id="clear-history-btn" class="btn btn-danger">全部清除</button>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>抽中獎品</th>
+                                    <th>得獎者姓名</th>
+                                    <th>得獎者積分</th>
+                                    <th>部門</th>
+                                    <th>抽中時間</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-table-body">
+                                <tr>
+                                    <td colspan="5" class="empty-row">目前尚無抽獎中獎紀錄</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- 開獎結果彈出 Modal (華麗得獎慶祝卡片) -->
+    <div id="winner-modal" class="modal-overlay">
+        <div class="winner-congrats-card">
+            <!-- 閃亮發光背景 -->
+            <div class="congrats-glow"></div>
+            
+            <div class="congrats-header">
+                <span class="crown-icon">👑</span>
+                <h2>恭喜得獎者！</h2>
+            </div>
+            
+            <div class="prize-reveal-title">
+                抽中 <span id="modal-prize-name" class="text-highlight">--</span>
+            </div>
+
+            <div id="winners-container" class="winners-flex-list">
+                <!-- 動態注入得獎者卡片 -->
+            </div>
+
+            <div class="modal-actions">
+                <button id="close-modal-btn" class="btn btn-primary btn-lg btn-glow">確認並收下</button>
+            </div>
+        </div>
+        <!-- 獨立的五彩碎紙屑 Canvas 覆蓋層 -->
+        <canvas id="confetti-canvas"></canvas>
+    </div>
+
+    <!-- 全域通知 Banner -->
+    <div id="notification-toast" class="toast">
+        <span id="toast-message">提示訊息</span>
+    </div>
+
+    <script src="index.js"></script>
+</body>
+</html>
