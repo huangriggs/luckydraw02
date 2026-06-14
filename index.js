@@ -11,7 +11,9 @@ const STATE = {
     isDrawing: false,
     soundEnabled: true,
     drawInterval: null,
-    canvasAnimationId: null
+    canvasAnimationId: null,
+    visualTheme: 'aurora', // 'aurora' 或 'rubik'
+    autoStopTimeout: null // 自動開獎倒數定時器
 };
 
 // 本地儲存金鑰
@@ -677,6 +679,22 @@ function escapeHTML(str) {
 // 8. 抽獎控制器與核心算法
 // --------------------------------------------------
 function initControlHandlers() {
+    // 🎨 主題選擇切換
+    const themeSelect = document.getElementById('theme-select');
+    if (themeSelect) {
+        themeSelect.addEventListener('change', (e) => {
+            STATE.visualTheme = e.target.value;
+            if (STATE.visualTheme === 'rubik') {
+                document.body.classList.add('theme-rubik');
+                initRubikCube();
+            } else {
+                document.body.classList.remove('theme-rubik');
+                rebuildParticles();
+            }
+            showToast('已切換視覺主題！');
+        });
+    }
+
     const select = document.getElementById('prize-select');
     select.addEventListener('change', (e) => {
         STATE.selectedPrizeId = e.target.value;
@@ -720,6 +738,24 @@ function initControlHandlers() {
         });
         downloadCSVWithBOM('極光霓虹抽獎中獎名單.csv', content);
     });
+
+    // 鍵盤放大縮小魔術方塊
+    document.addEventListener('keydown', (e) => {
+        if (STATE.visualTheme !== 'rubik') return;
+
+        const activeEl = document.activeElement;
+        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+            return;
+        }
+
+        if (e.key === '+' || e.key === '=') {
+            e.preventDefault();
+            RUBIK_STATE.scale = Math.min(2.0, RUBIK_STATE.scale + 0.05);
+        } else if (e.key === '-' || e.key === '_') {
+            e.preventDefault();
+            RUBIK_STATE.scale = Math.max(0.5, RUBIK_STATE.scale - 0.05);
+        }
+    });
 }
 
 function toggleDraw() {
@@ -751,26 +787,42 @@ function startDrawScrolling() {
     document.querySelectorAll('input[name="draw-mode"]').forEach(el => el.disabled = true);
     
     const drawBtn = document.getElementById('start-draw-btn');
-    drawBtn.textContent = '暫停開獎';
-    drawBtn.classList.remove('btn-primary');
-    drawBtn.classList.add('btn-danger');
+    drawBtn.disabled = true; // 鎖定按鈕防止重疊點擊
+    drawBtn.textContent = '開獎中...';
+    drawBtn.classList.remove('btn-glow');
 
     document.getElementById('stage-hint').textContent = '抽獎名單滾動中...';
 
     // 啟動音效
     playTickSoundLoop();
 
-    // 粒子加速旋轉效果
-    CANVAS_STATE.spinSpeed = 0.15;
+    if (STATE.visualTheme === 'rubik') {
+        RUBIK_STATE.spinSpeedX = 0.12;
+        RUBIK_STATE.spinSpeedY = 0.12;
+    } else {
+        // 粒子加速旋轉效果
+        CANVAS_STATE.spinSpeed = 0.15;
+    }
 
     // 動態名字滾動顯示
     STATE.drawInterval = setInterval(() => {
         const randomIndex = Math.floor(Math.random() * candidates.length);
         document.getElementById('rolling-name-display').textContent = candidates[randomIndex].name;
     }, 80);
+
+    // 隨機於 7 ~ 10 秒內自動停止抽獎並揭曉
+    const autoRevealTime = 7000 + Math.random() * 3000;
+    STATE.autoStopTimeout = setTimeout(() => {
+        stopDrawAndReveal();
+    }, autoRevealTime);
 }
 
 function stopDrawAndReveal() {
+    if (STATE.autoStopTimeout) {
+        clearTimeout(STATE.autoStopTimeout);
+        STATE.autoStopTimeout = null;
+    }
+
     clearInterval(STATE.drawInterval);
     stopTickSoundLoop();
 
@@ -782,12 +834,18 @@ function stopDrawAndReveal() {
     document.querySelectorAll('input[name="draw-mode"]').forEach(el => el.disabled = false);
     
     const drawBtn = document.getElementById('start-draw-btn');
+    drawBtn.disabled = false; // 恢復啟用
     drawBtn.textContent = '開始抽獎';
     drawBtn.classList.add('btn-primary');
     drawBtn.classList.remove('btn-danger');
+    drawBtn.classList.add('btn-glow');
 
-    // Canvas 粒子恢復平緩轉速
+    // Canvas 粒子與魔術方塊恢復平緩轉速
     CANVAS_STATE.spinSpeed = 0.015;
+    if (STATE.visualTheme === 'rubik') {
+        RUBIK_STATE.spinSpeedX = 0.005;
+        RUBIK_STATE.spinSpeedY = 0.008;
+    }
 
     // 核心抽獎邏輯運算
     const prize = STATE.prizes.find(pr => pr.id === STATE.selectedPrizeId);
@@ -859,6 +917,9 @@ function stopDrawAndReveal() {
 
     saveToStorage();
     updateAllUI();
+    if (STATE.visualTheme === 'rubik') {
+        distributeNamesOnCube(winners);
+    }
 
     // 播放勝利大喇叭 fanfare 音效
     playWinSound();
@@ -1116,6 +1177,18 @@ function initCanvas() {
     
     // 啟動渲染迴圈
     renderCanvasLoop();
+
+    // 滑鼠滾輪放大縮小魔術方塊
+    canvas.addEventListener('wheel', (e) => {
+        if (STATE.visualTheme === 'rubik') {
+            e.preventDefault();
+            if (e.deltaY < 0) {
+                RUBIK_STATE.scale = Math.min(2.0, RUBIK_STATE.scale + 0.05);
+            } else {
+                RUBIK_STATE.scale = Math.max(0.5, RUBIK_STATE.scale - 0.05);
+            }
+        }
+    }, { passive: false });
 }
 
 function resizeCanvas() {
@@ -1156,6 +1229,16 @@ function renderCanvasLoop() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    if (STATE.visualTheme === 'rubik') {
+        renderRubikTheme();
+    } else {
+        renderAuroraTheme();
+    }
+
+    STATE.canvasAnimationId = requestAnimationFrame(renderCanvasLoop);
+}
+
+function renderAuroraTheme() {
     // 累積自旋轉角度
     CANVAS_STATE.angleY += CANVAS_STATE.spinSpeed;
     CANVAS_STATE.angleX += CANVAS_STATE.spinSpeed * 0.4;
@@ -1173,8 +1256,6 @@ function renderCanvasLoop() {
     });
 
     ctx.globalAlpha = 1.0; // 重設透明度
-
-    STATE.canvasAnimationId = requestAnimationFrame(renderCanvasLoop);
 }
 
 // --------------------------------------------------
@@ -1284,4 +1365,421 @@ const originalSaveToStorage = saveToStorage;
 saveToStorage = function() {
     originalSaveToStorage();
     rebuildParticles(); // 資料改變時，同步重構粒子球體的名字
+    if (STATE.visualTheme === 'rubik') {
+        distributeNamesOnCube();
+    }
 };
+
+// --------------------------------------------------
+// 13. 3D 魔術方塊 (Rubik's Cube) 物理與渲染引擎
+// --------------------------------------------------
+
+const RUBIK_STATE = {
+    cubelets: [],
+    angleX: 0.35, // 初始俯視角
+    angleY: 0.45, // 初始側視角
+    angleZ: 0,
+    spinSpeedX: 0.005,
+    spinSpeedY: 0.008,
+    activeSlice: null,
+    winnerNames: [],
+    scale: 1.0  // 預設縮放大小為 1.0
+};
+
+class RubikFace {
+    constructor(cubelet, localNormal, color, name = '') {
+        this.cubelet = cubelet;
+        this.localNormal = { ...localNormal };
+        this.color = color;
+        this.name = name;
+        this.localVertices = this.calculateLocalVertices();
+    }
+
+    calculateLocalVertices() {
+        const size = 23; // 小方塊邊長的一半 (總邊長 46，中心距 52)
+        const nx = this.localNormal.x;
+        const ny = this.localNormal.y;
+        const nz = this.localNormal.z;
+
+        if (nx !== 0) {
+            return [
+                { x: nx * size, y: -size, z: -size },
+                { x: nx * size, y: -size, z: size },
+                { x: nx * size, y: size, z: size },
+                { x: nx * size, y: size, z: -size }
+            ];
+        } else if (ny !== 0) {
+            return [
+                { x: -size, y: ny * size, z: -size },
+                { x: size, y: ny * size, z: -size },
+                { x: size, y: ny * size, z: size },
+                { x: -size, y: ny * size, z: size }
+            ];
+        } else {
+            return [
+                { x: -size, y: -size, z: nz * size },
+                { x: size, y: -size, z: nz * size },
+                { x: size, y: size, z: nz * size },
+                { x: -size, y: size, z: nz * size }
+            ];
+        }
+    }
+}
+
+class RubikCubelet {
+    constructor(gridX, gridY, gridZ) {
+        this.gridX = gridX;
+        this.gridY = gridY;
+        this.gridZ = gridZ;
+        
+        const dist = 52; // 中心點間距
+        this.cx = gridX * dist;
+        this.cy = gridY * dist;
+        this.cz = gridZ * dist;
+
+        this.faces = [];
+        this.initFaces();
+    }
+
+    initFaces() {
+        const colors = {
+            front: '#ff3b30',  // 紅 (Z=1)
+            back: '#ff9500',   // 橘 (Z=-1)
+            up: '#ffffff',     // 白 (Y=-1)
+            down: '#ffcc00',   // 黃 (Y=1)
+            left: '#007aff',   // 藍 (X=-1)
+            right: '#34c759',  // 綠 (X=1)
+            internal: '#111528'
+        };
+
+        this.faces.push(new RubikFace(this, { x: 0, y: 0, z: 1 }, this.gridZ === 1 ? colors.front : colors.internal));
+        this.faces.push(new RubikFace(this, { x: 0, y: 0, z: -1 }, this.gridZ === -1 ? colors.back : colors.internal));
+        this.faces.push(new RubikFace(this, { x: 0, y: -1, z: 0 }, this.gridY === -1 ? colors.up : colors.internal));
+        this.faces.push(new RubikFace(this, { x: 0, y: 1, z: 0 }, this.gridY === 1 ? colors.down : colors.internal));
+        this.faces.push(new RubikFace(this, { x: -1, y: 0, z: 0 }, this.gridX === -1 ? colors.left : colors.internal));
+        this.faces.push(new RubikFace(this, { x: 1, y: 0, z: 0 }, this.gridX === 1 ? colors.right : colors.internal));
+    }
+
+    rotateSlice(axis, angle) {
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+
+        // 旋轉中心點
+        if (axis === 'x') {
+            const newY = this.cy * cos - this.cz * sin;
+            const newZ = this.cz * cos + this.cy * sin;
+            this.cy = newY;
+            this.cz = newZ;
+        } else if (axis === 'y') {
+            const newX = this.cx * cos - this.cz * sin;
+            const newZ = this.cz * cos + this.cx * sin;
+            this.cx = newX;
+            this.cz = newZ;
+        } else if (axis === 'z') {
+            const newX = this.cx * cos - this.cy * sin;
+            const newY = this.cy * cos + this.cx * sin;
+            this.cx = newX;
+            this.cy = newY;
+        }
+
+        // 旋轉面與頂點
+        this.faces.forEach(face => {
+            const ln = face.localNormal;
+            if (axis === 'x') {
+                const ny = ln.y * cos - ln.z * sin;
+                const nz = ln.z * cos + ln.y * sin;
+                ln.y = ny; ln.z = nz;
+            } else if (axis === 'y') {
+                const nx = ln.x * cos - ln.z * sin;
+                const nz = ln.z * cos + ln.x * sin;
+                ln.x = nx; ln.z = nz;
+            } else if (axis === 'z') {
+                const nx = ln.x * cos - ln.y * sin;
+                const ny = ln.y * cos + ln.x * sin;
+                ln.x = nx; ln.y = ny;
+            }
+
+            face.localVertices.forEach(v => {
+                if (axis === 'x') {
+                    const ny = v.y * cos - v.z * sin;
+                    const nz = v.z * cos + v.y * sin;
+                    v.y = ny; v.z = nz;
+                } else if (axis === 'y') {
+                    const nx = v.x * cos - v.z * sin;
+                    const nz = v.z * cos + v.x * sin;
+                    v.x = nx; v.z = nz;
+                } else if (axis === 'z') {
+                    const nx = v.x * cos - v.y * sin;
+                    const ny = v.y * cos + v.x * sin;
+                    v.x = nx; v.y = ny;
+                }
+            });
+        });
+
+        const dist = 52;
+        this.gridX = Math.round(this.cx / dist);
+        this.gridY = Math.round(this.cy / dist);
+        this.gridZ = Math.round(this.cz / dist);
+    }
+}
+
+function initRubikCube() {
+    RUBIK_STATE.cubelets = [];
+    for (let x = -1; x <= 1; x++) {
+        for (let y = -1; y <= 1; y++) {
+            for (let z = -1; z <= 1; z++) {
+                RUBIK_STATE.cubelets.push(new RubikCubelet(x, y, z));
+            }
+        }
+    }
+    distributeNamesOnCube();
+}
+
+function distributeNamesOnCube(winners = []) {
+    const outerFaces = [];
+    RUBIK_STATE.cubelets.forEach(c => {
+        c.faces.forEach(f => {
+            if (f.color !== '#111528') {
+                outerFaces.push(f);
+                f.name = '';
+            }
+        });
+    });
+
+    if (winners && winners.length > 0) {
+        // 找出原始正面（localNormal 貼近最初設定的 Z=1 面）的外露面
+        const frontFaces = outerFaces.filter(f => {
+            return Math.abs(f.localNormal.x) < 0.1 && Math.abs(f.localNormal.y) < 0.1 && f.localNormal.z > 0.9;
+        });
+
+        // 依離中心點的距離排序，正中央優先
+        frontFaces.sort((a, b) => {
+            const distA = a.cubelet.gridX * a.cubelet.gridX + a.cubelet.gridY * a.cubelet.gridY;
+            const distB = b.cubelet.gridX * b.cubelet.gridX + b.cubelet.gridY * b.cubelet.gridY;
+            return distA - distB;
+        });
+
+        winners.forEach((winner, idx) => {
+            if (frontFaces[idx]) {
+                frontFaces[idx].name = winner.name;
+            }
+        });
+
+        frontFaces.forEach((f, idx) => {
+            if (idx >= winners.length) {
+                f.name = '恭喜中獎';
+            }
+        });
+    } else {
+        const candidates = STATE.participants.filter(p => !p.hasWon);
+        const namePool = candidates.map(c => c.name);
+        
+        const dummyNames = ['幸運兒', '好運來', '福星', '大吉', '大利', '中大獎', '發大財', '喜氣洋洋'];
+        while (namePool.length < outerFaces.length) {
+            namePool.push(...dummyNames);
+        }
+
+        namePool.sort(() => Math.random() - 0.5);
+
+        outerFaces.forEach((f, idx) => {
+            f.name = namePool[idx % namePool.length];
+        });
+    }
+}
+
+function updateSliceRotation() {
+    if (!RUBIK_STATE.activeSlice) {
+        if (STATE.isDrawing) {
+            // 隨機旋轉某一層
+            const axes = ['x', 'y', 'z'];
+            const axis = axes[Math.floor(Math.random() * axes.length)];
+            const values = [-1, 0, 1];
+            const value = values[Math.floor(Math.random() * values.length)];
+            const dir = Math.random() > 0.5 ? 1 : -1;
+
+            RUBIK_STATE.activeSlice = {
+                axis: axis,
+                value: value,
+                angle: 0,
+                targetAngle: (Math.PI / 2) * dir,
+                speed: 0.18 // 旋轉速度快一點以搭配抽獎節奏
+            };
+        } else {
+            return;
+        }
+    }
+
+    const slice = RUBIK_STATE.activeSlice;
+    const step = Math.sign(slice.targetAngle) * slice.speed;
+    slice.angle += step;
+
+    if (Math.abs(slice.angle) >= Math.abs(slice.targetAngle)) {
+        const diff = slice.targetAngle - (slice.angle - step);
+        rotateSliceGroup(slice.axis, slice.value, diff);
+        RUBIK_STATE.activeSlice = null;
+    } else {
+        rotateSliceGroup(slice.axis, slice.value, step);
+    }
+}
+
+function rotateSliceGroup(axis, value, angle) {
+    RUBIK_STATE.cubelets.forEach(c => {
+        let match = false;
+        if (axis === 'x' && c.gridX === value) match = true;
+        if (axis === 'y' && c.gridY === value) match = true;
+        if (axis === 'z' && c.gridZ === value) match = true;
+
+        if (match) {
+            c.rotateSlice(axis, angle);
+        }
+    });
+}
+
+function renderRubikTheme() {
+    if (RUBIK_STATE.cubelets.length === 0) {
+        initRubikCube();
+    }
+
+    // 1. 更新自轉
+    RUBIK_STATE.angleY += RUBIK_STATE.spinSpeedY;
+    RUBIK_STATE.angleX += RUBIK_STATE.spinSpeedX;
+
+    // 2. 如果沒在抽獎，緩慢將角度對齊黃金 3D 視角 (0.35, 0.45)
+    if (!STATE.isDrawing) {
+        RUBIK_STATE.angleX += (0.35 - RUBIK_STATE.angleX) * 0.05;
+        RUBIK_STATE.angleY += (0.45 - RUBIK_STATE.angleY) * 0.05;
+    }
+
+    // 3. 處理扭轉物理
+    updateSliceRotation();
+
+    // 4. 計算所有面在全域旋轉後的 3D 點並收集
+    const allRenderFaces = [];
+    const cosX = Math.cos(RUBIK_STATE.angleX);
+    const sinX = Math.sin(RUBIK_STATE.angleX);
+    const cosY = Math.cos(RUBIK_STATE.angleY);
+    const sinY = Math.sin(RUBIK_STATE.angleY);
+
+    RUBIK_STATE.cubelets.forEach(c => {
+        c.faces.forEach(face => {
+            // 計算面的旋轉後法向量
+            const ln = face.localNormal;
+            // 繞 Y 軸
+            const rnx1 = ln.x * cosY - ln.z * sinY;
+            const rnz1 = ln.z * cosY + ln.x * sinY;
+            // 繞 X 軸
+            const rny2 = ln.y * cosX - rnz1 * sinX;
+            const rnz2 = rnz1 * cosX + ln.y * sinX;
+
+            // Back-face Culling: 如果面向背面 (rnz2 > 0)，則省略不畫
+            if (rnz2 > 0.05) return;
+
+            // 計算 4 個頂點的 3D 旋轉位置
+            const scaleFactor = RUBIK_STATE.scale || 1.0;
+            const pts3d = face.localVertices.map(v => {
+                const x3d = (c.cx + v.x) * scaleFactor;
+                const y3d = (c.cy + v.y) * scaleFactor;
+                const z3d = (c.cz + v.z) * scaleFactor;
+
+                // 繞 Y 軸
+                const rx1 = x3d * cosY - z3d * sinY;
+                const rz1 = z3d * cosY + x3d * sinY;
+                // 繞 X 軸
+                const ry2 = y3d * cosX - rz1 * sinX;
+                const rz2 = rz1 * cosX + y3d * sinX;
+
+                return { x: rx1, y: ry2, z: rz2 };
+            });
+
+            // 計算中心點 z 值供 Painter's Algorithm 排序使用
+            const centerZ = pts3d.reduce((sum, p) => sum + p.z, 0) / 4;
+
+            allRenderFaces.push({
+                face: face,
+                points3d: pts3d,
+                centerZ: centerZ,
+                normalZ: rnz2,
+                normalX: rnx1,
+                normalY: rny2
+            });
+        });
+    });
+
+    // 5. 由遠到近排序 (centerZ 越大代表在越後面，應優先繪製)
+    allRenderFaces.sort((a, b) => b.centerZ - a.centerZ);
+
+    // 6. 繪製面
+    const fov = 400;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+
+    allRenderFaces.forEach(rf => {
+        const pts2d = rf.points3d.map(p => {
+            const scale = fov / (fov + p.z);
+            return {
+                x: cx + p.x * scale,
+                y: cy + p.y * scale
+            };
+        });
+
+        // 簡單光照效果：根據法向量與假想光源 (-0.4, -0.6, -0.6) 的夾角計算明暗
+        const lx = -0.4, ly = -0.6, lz = -0.6;
+        const len = Math.sqrt(rf.normalX * rf.normalX + rf.normalY * rf.normalY + rf.normalZ * rf.normalZ);
+        const nx = rf.normalX / len;
+        const ny = rf.normalY / len;
+        const nz = rf.normalZ / len;
+        const dot = nx * lx + ny * ly + nz * lz;
+        
+        const lightMult = 1.0 + dot * 0.25;
+
+        ctx.beginPath();
+        ctx.moveTo(pts2d[0].x, pts2d[0].y);
+        for (let i = 1; i < pts2d.length; i++) {
+            ctx.lineTo(pts2d[i].x, pts2d[i].y);
+        }
+        ctx.closePath();
+
+        ctx.fillStyle = adjustBrightness(rf.face.color, lightMult);
+        ctx.strokeStyle = '#080a14';
+        ctx.lineWidth = 1.5;
+        ctx.fill();
+        ctx.stroke();
+
+        // 7. 繪製貼紙上的名字
+        if (rf.face.name && rf.face.color !== '#111528') {
+            const avg2d = pts2d.reduce((acc, p) => ({ x: acc.x + p.x / 4, y: acc.y + p.y / 4 }), { x: 0, y: 0 });
+            const scale = fov / (fov + rf.centerZ);
+            
+            ctx.save();
+            ctx.globalAlpha = 0.95;
+            const isWinner = rf.face.name !== '恭喜中獎' && rf.face.name !== '幸運兒' && !['好運來', '福星', '大吉', '大利', '中大獎', '發大財', '喜氣洋洋'].includes(rf.face.name);
+            ctx.fillStyle = isWinner ? '#ffdf00' : '#111528';
+            ctx.font = `bold ${Math.max(9, 11 * scale)}px var(--font-outfit)`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            if (isWinner) {
+                ctx.shadowColor = 'rgba(255, 223, 0, 0.6)';
+                ctx.shadowBlur = 6;
+            } else {
+                const darkBg = ['#ff3b30', '#007aff', '#ff9500'].includes(rf.face.color);
+                ctx.fillStyle = darkBg ? '#ffffff' : '#111528';
+            }
+
+            const maxW = 34 * scale;
+            ctx.fillText(rf.face.name, avg2d.x, avg2d.y, maxW);
+            ctx.restore();
+        }
+    });
+}
+
+function adjustBrightness(hex, percent) {
+    if (hex === '#111528') return hex;
+    
+    let num = parseInt(hex.replace("#",""), 16),
+    amt = Math.round(2.55 * ((percent - 1.0) * 100)),
+    R = (num >> 16) + amt,
+    G = (num >> 8 & 0x00FF) + amt,
+    B = (num & 0x0000FF) + amt;
+    return "#" + (0x1000000 + (R<255?R<0?0:R:255)*0x10000 + (G<255?G<0?0:G:255)*0x100 + (B<255?B<0?0:B:255)).toString(16).slice(1);
+}

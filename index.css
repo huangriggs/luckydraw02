@@ -947,3 +947,26 @@ body {
     from { opacity: 0.75; transform: scale(1); }
     to { opacity: 1; transform: scale(1.03); }
 }
+
+/* 11. 魔術方塊主題色彩與動效 */
+body.theme-rubik {
+    --primary: hsl(35, 100%, 50%);         /* 橘 */
+    --primary-glow: hsla(35, 100%, 50%, 0.35);
+    --secondary: hsl(145, 80%, 50%);       /* 綠 */
+    --secondary-glow: hsla(145, 80%, 50%, 0.35);
+}
+
+body.theme-rubik .aurora-bg {
+    opacity: 0.35;
+    background-image: 
+        radial-gradient(hsla(186, 100%, 48%, 0.08) 1px, transparent 1px),
+        radial-gradient(hsla(282, 100%, 60%, 0.08) 1px, transparent 1px);
+    background-size: 40px 40px;
+    background-position: 0 0, 20px 20px;
+    animation: gridShift 20s infinite linear;
+}
+
+@keyframes gridShift {
+    from { background-position: 0 0, 20px 20px; }
+    to { background-position: 40px 40px, 60px 60px; }
+}
